@@ -1175,7 +1175,15 @@ void FDestinyMapImportCFGModule::FImportTextures(TSharedPtr<FJsonObject> Materia
 					if (UTexture2D* ImportedTex = Cast<UTexture2D>(ImportedObj))
 					{
 						ImportedTex->SRGB = (Colorspace == TEXT("sRGB"));
-						ImportedTex->CompressionSettings = Format.Contains("BC7") ? TC_BC7 : TC_Default;
+						if (Format == "BC1_UNORM_SRGB")	ImportedTex->CompressionSettings = TC_Default;
+						else if (Format == "BC7_UNORM_SRGB" || Format == "BC7_UNORM")	ImportedTex->CompressionSettings = TC_BC7;
+						else if (Format == "BC5_UNORM") ImportedTex->CompressionSettings = TC_Normalmap;
+						else if (Format == "BC4_UNORM")	ImportedTex->CompressionSettings = TC_Alpha;
+						else
+						{
+							UE_LOG(LogTemp, Warning, TEXT("Unknown Texture Format: %s"), *Format);
+							ImportedTex->CompressionSettings = TC_Default;
+						}
 						ImportedTex->PostEditChange();
 						ImportedTex->MarkPackageDirty();
 					}
@@ -1187,6 +1195,27 @@ void FDestinyMapImportCFGModule::FImportTextures(TSharedPtr<FJsonObject> Materia
 		}
 	}
 }
+
+/*
+	TC_Default					UMETA(DisplayName = "Default (DXT1/5, BC1/3 on DX11)"),
+	TC_Normalmap				UMETA(DisplayName = "Normalmap (DXT5, BC5 on DX11)"),
+	TC_Masks					UMETA(DisplayName = "Masks (no sRGB)"),
+	TC_Grayscale				UMETA(DisplayName = "Grayscale (G8/16, RGB8 sRGB)"),
+	TC_Displacementmap			UMETA(DisplayName = "Displacementmap (G8/16)"),
+	TC_VectorDisplacementmap	UMETA(DisplayName = "VectorDisplacementmap (RGBA8)"),
+	TC_HDR						UMETA(DisplayName = "HDR (RGBA16F, no sRGB)"),
+	TC_EditorIcon				UMETA(DisplayName = "UserInterface2D (RGBA)"),
+	TC_Alpha					UMETA(DisplayName = "Alpha (no sRGB, BC4 on DX11)"),
+	TC_DistanceFieldFont		UMETA(DisplayName = "DistanceFieldFont (G8)"),
+	TC_HDR_Compressed			UMETA(DisplayName = "HDR Compressed (RGB, BC6H, DX11)"),
+	TC_BC7						UMETA(DisplayName = "BC7 (DX11, optional A)"),
+	TC_HalfFloat				UMETA(DisplayName = "Half Float (R16F)"),
+	TC_LQ				        UMETA(Hidden, DisplayName = "Low Quality (BGR565/BGR555A1)", ToolTip = "BGR565/BGR555A1, fallback to DXT1/DXT5 on Mac platform"),
+	TC_EncodedReflectionCapture	UMETA(Hidden),
+	TC_SingleFloat				UMETA(DisplayName = "Single Float (R32F)"),
+	TC_HDR_F32					UMETA(DisplayName = "HDR High Precision (RGBA32F)"),
+	TC_MAX,
+*/
 
 void FDestinyMapImportCFGModule::FImportMaterials(FString ConfigPath, FStaticMaterial& StaticMaterialSlot, FSkeletalMaterial& SkeletalMaterialSlot, TSharedPtr<FJsonObject> MaterialJson, bool isStaticMesh, UTextureFactory* TextureFactory)
 {
@@ -1206,11 +1235,10 @@ void FDestinyMapImportCFGModule::FImportMaterials(FString ConfigPath, FStaticMat
 		MaterialName = MaterialName.Left(NclPos);
 	}
 	FString MatPath = "/Game/" + CFGFolderName + "/Materials/" + MaterialName;
-	FString MaterialAssetPath = "/Game/" + CFGFolderName + "/Materials/" + MaterialName + "." + MaterialName;
 
-	if (UEditorAssetLibrary::DoesAssetExist(MaterialAssetPath))
+	if (UEditorAssetLibrary::DoesAssetExist(MatPath))
 	{
-		UObject* LoadedObj = UEditorAssetLibrary::LoadAsset(MaterialAssetPath);
+		UObject* LoadedObj = UEditorAssetLibrary::LoadAsset(MatPath);
 		if (!LoadedObj)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("No Object Loaded: %s"), *LoadedObj->GetName());
