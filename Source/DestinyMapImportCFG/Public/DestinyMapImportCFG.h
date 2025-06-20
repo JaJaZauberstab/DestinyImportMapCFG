@@ -7,12 +7,14 @@
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Engine/SkinnedAssetCommon.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "Modules/ModuleManager.h"
 
+
 class FToolBarBuilder;
 class FMenuBuilder;
-
+/*
 UENUM(BlueprintType)
 enum EImportMapTarget : uint8
 {
@@ -21,7 +23,7 @@ enum EImportMapTarget : uint8
 	IMT_New UMETA(DisplayName = "Import to New Map"),
 	IMT_MAX,
 };
-
+*/
 UENUM(BlueprintType)
 enum class ETextureFormat : uint8
 {
@@ -144,13 +146,14 @@ public:
 	void FImportTextures(TSharedPtr<FJsonObject> MaterialJson, FString ConfigPath, UTextureFactory* TextureFactory);
 	void FImportToMap(TArray<FString> OutFiles);
 	void FImportLightingToMap(FString ConfigPath);
+
+
 	// Import vars
 	bool bImportTextures = true;
 	bool bImportMaterials = true;
-	//EImportMapTarget ImportMapTarget = IMT_Current;
-	//TArray<TSharedPtr<EImportMapTarget>> EnumOptions;
 	bool bUseCurrentMap = true;
-	//bool bSkipExistingAssets = true;
+	bool bMaterialGen = true UMETA(EditCondition = "bImportMaterials");
+	bool bDiffuseApply = true UMETA(EditCondition = "bSkipMaterialGen");
 	float fMapScale = 100.f;
 	bool bImportAtmosphere = false;
 	bool bImportCubeMap = false;

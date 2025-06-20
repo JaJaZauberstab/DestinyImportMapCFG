@@ -34,6 +34,7 @@
 #include "Engine/StaticMeshActor.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Animation/SkeletalMeshActor.h"
+#include "Engine/SkinnedAssetCommon.h"
 #include "Engine/World.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/PointLight.h"
@@ -50,6 +51,8 @@
 #include "Editor/EditorEngine.h"
 #include "Engine/Light.h"
 #include "ToolMenus.h"
+#include "Engine/SkeletalMesh.h"
+#include "Materials/MaterialExpressionTextureSample.h"
 
 static const FName DestinyMapImportCFGTabName("DestinyMapImportCFG");
 
@@ -115,6 +118,7 @@ TSharedRef<SDockTab> FDestinyMapImportCFGModule::OnSpawnPluginTab(const FSpawnTa
 				[
 					SNew(STextBlock)
 						.Text(FText::FromString("Destiny Map Import CFG"))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 15))
 				]
 
 				+ SVerticalBox::Slot()
@@ -124,6 +128,7 @@ TSharedRef<SDockTab> FDestinyMapImportCFGModule::OnSpawnPluginTab(const FSpawnTa
 				[
 					SNew(STextBlock)
 						.Text(FText::FromString("Model Import Options"))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
 				]
 
 				+ SVerticalBox::Slot()
@@ -152,34 +157,96 @@ TSharedRef<SDockTab> FDestinyMapImportCFGModule::OnSpawnPluginTab(const FSpawnTa
 						]
 				]
 				+ SVerticalBox::Slot()
+				.HAlign(HAlign_Left)
+				.VAlign(VAlign_Center)
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+						.Text(FText::FromString("Import Texture Format:"))
+				]
+				+ SVerticalBox::Slot()
 				.AutoHeight()
 				.Padding(5)
 				[
 					SNew(SCFGTextureFormatCombo)
+						.IsEnabled_Lambda([this]() { return bImportTextures; })
 						.OnFormatChanged(FOnFormatChanged::CreateLambda([this](ETextureFormat Format)
 					{
 						this->SelectedFormat = Format;
 					}))
 				]
+
+
 				+ SVerticalBox::Slot()
+				.HAlign(HAlign_Left)
+				.VAlign(VAlign_Center)
 				.AutoHeight()
-				.Padding(5)
 				[
 					SNew(SCheckBox)
 						.IsChecked_Lambda([this]() { return bImportMaterials ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
 						.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { bImportMaterials = (NewState == ECheckBoxState::Checked); })
 						.Content()
 						[
-							SNew(STextBlock).Text(FText::FromString("Import Materials"))
+							SNew(STextBlock)
+								.Text(FText::FromString("Import Materials"))
+								.ToolTipText(FText::FromString("Imports Materials based on Below Settings"))
+						]
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(5)
+				[
+					SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+						.HAlign(HAlign_Left)
+						.VAlign(VAlign_Center)
+						.AutoHeight()
+						[
+							SNew(STextBlock)
+								.Text(FText::FromString("Destiny Material Import Settings:"))
+						]
+						+ SVerticalBox::Slot()
+						.HAlign(HAlign_Left)
+						.VAlign(VAlign_Center)
+						.AutoHeight()
+						[
+							SNew(SCheckBox)
+								.IsEnabled_Lambda([this]() { return bImportMaterials && bImportTextures; })
+								.IsChecked_Lambda([this]() { return bMaterialGen ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+								.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { bMaterialGen = (NewState == ECheckBoxState::Checked); })
+								.Content()
+								[
+									SNew(STextBlock)
+										.Text(FText::FromString("Add Texture Samples"))
+										.ToolTipText(FText::FromString("Adds all required Texture Samples to Materials"))
+								]
+						]
+						+ SVerticalBox::Slot()
+						.HAlign(HAlign_Left)
+						.VAlign(VAlign_Center)
+						.AutoHeight()
+						[
+							SNew(SCheckBox)
+								.IsEnabled_Lambda([this]() { return bMaterialGen && bImportMaterials && bImportTextures; })
+								.IsChecked_Lambda([this]() { return bDiffuseApply ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+								.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { bDiffuseApply = (NewState == ECheckBoxState::Checked); })
+								.Content()
+								[
+									SNew(STextBlock)
+										.Text(FText::FromString("Apply Diffuse Map"))
+										.ToolTipText(FText::FromString("Attempt to Apply Diffuse Map to Materials"))
+								]
 						]
 				]
 				+ SVerticalBox::Slot()
 				.HAlign(HAlign_Left)
 				.VAlign(VAlign_Center)
 				.AutoHeight()
+				.Padding(15)
 				[
 					SNew(STextBlock)
 						.Text(FText::FromString("Map Building Options"))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
 				]
 				+ SVerticalBox::Slot()
 				.HAlign(HAlign_Left)
@@ -279,15 +346,6 @@ TSharedRef<SDockTab> FDestinyMapImportCFGModule::OnSpawnPluginTab(const FSpawnTa
 						]
 				]
 				*/
-			/*
-			bool bImportTextures = true;
-			bool bImportMaterials = true;
-			bool bImportToNewMap = true;
-			bool bImportAtmosphere = false;
-			bool bImportCubeMap = false;
-			float fLightIntensity = 10.0f;
-			bool bImportLights = true;
-			*/
 			];
 }
 
@@ -410,24 +468,22 @@ void FDestinyMapImportCFGModule::FImportLightingToMap(FString ConfigPath)
 				InstanceObj->GetArrayField("Translation")[1]->AsNumber(),
 				InstanceObj->GetArrayField("Translation")[2]->AsNumber()
 			);
-
+			Location *= fMapScale;
 			FQuat Rotation(
 				InstanceObj->GetArrayField("Rotation")[0]->AsNumber(),
 				InstanceObj->GetArrayField("Rotation")[1]->AsNumber(),
 				InstanceObj->GetArrayField("Rotation")[2]->AsNumber(),
 				InstanceObj->GetArrayField("Rotation")[3]->AsNumber()
 			);
-
 			FVector Scale(
 				InstanceObj->GetArrayField("Scale")[0]->AsNumber(),
 				InstanceObj->GetArrayField("Scale")[1]->AsNumber(),
 				InstanceObj->GetArrayField("Scale")[2]->AsNumber()
 			);
-
-			Location *= fMapScale;
-			FVector NewScale = Scale * fMapScale;
-
-			FTransform Transform(Rotation, Location, NewScale);
+			Location.Y *= -1.f;
+			Rotation.Y *= -1.f;
+			Rotation.W *= -1.f;
+			FTransform Transform(Rotation, Location, Scale);
 
 			if (Type == "Line")
 			{
@@ -449,7 +505,7 @@ void FDestinyMapImportCFGModule::FImportLightingToMap(FString ConfigPath)
 
 				if (!CookieHash.IsEmpty())
 				{
-					FString CookieAssetPath = "/Game/" + CFGFolderName + "/Textures/" + CookieHash + TEXT(".") + CookieHash;
+					FString CookieAssetPath = "/Game/" + CFGFolderName + "/Textures/Lights/" + CookieHash + TEXT(".") + CookieHash;
 					UTexture* CookieTexture = Cast<UTexture>(StaticLoadObject(UTexture::StaticClass(), nullptr, *CookieAssetPath));
 					if (CookieTexture)
 					{
@@ -488,14 +544,6 @@ void FDestinyMapImportCFGModule::ImportCharmCFGButtonClicked()
 	UFbxFactory* FbxFactory = NewObject<UFbxFactory>();
 	FbxFactory->AddToRoot();
 	FbxFactory->ConfigureProperties(); // initializes ImportUI
-	FbxFactory->ImportUI->bImportAsSkeletal = false;
-	FbxFactory->ImportUI->bImportMaterials = bImportMaterials;
-	FbxFactory->ImportUI->bImportTextures = false;
-	FbxFactory->ImportUI->SkeletalMeshImportData->ImportUniformScale = fMapScale;
-	FbxFactory->ImportUI->StaticMeshImportData->ImportUniformScale = fMapScale;
-	FbxFactory->ImportUI->StaticMeshImportData->bConvertScene = false;
-	FbxFactory->ImportUI->StaticMeshImportData->bConvertScene = false;
-	FbxFactory->ImportUI->StaticMeshImportData->bCombineMeshes = true;
 
 	TArray<FString> OutFiles;
 	if (!DesktopPlatform->OpenFileDialog(ParentWindowHandle, TEXT("Choose Charm CFG File/s"), FPaths::ProjectContentDir(), TEXT(""), TEXT("CFG files (*.cfg)|*.cfg|All files (*.*)|*.*"), EFileDialogFlags::Multiple, OutFiles)) return;
@@ -566,6 +614,14 @@ void FDestinyMapImportCFGModule::ImportCharmCFGButtonClicked()
 					}
 					*/
 
+					FbxFactory->ImportUI->bImportAsSkeletal = false;
+					FbxFactory->ImportUI->bImportMaterials = false;
+					FbxFactory->ImportUI->bImportTextures = false;
+					FbxFactory->ImportUI->SkeletalMeshImportData->ImportUniformScale = fMapScale;
+					FbxFactory->ImportUI->StaticMeshImportData->ImportUniformScale = fMapScale;
+					FbxFactory->ImportUI->StaticMeshImportData->bConvertScene = false;
+					FbxFactory->ImportUI->StaticMeshImportData->bConvertScene = false;
+					FbxFactory->ImportUI->StaticMeshImportData->bCombineMeshes = true;
 					UAutomatedAssetImportData* ImportData = NewObject<UAutomatedAssetImportData>();
 					ImportData->FactoryName = TEXT("FbxFactory");
 					ImportData->Factory = FbxFactory;
@@ -588,19 +644,32 @@ void FDestinyMapImportCFGModule::ImportCharmCFGButtonClicked()
 						for (UObject* Imported : ImportedAssets)
 						{
 
+							FSkeletalMaterial EmptySkeletalMaterialSlot;
 							if (UStaticMesh* StaticMesh = Cast<UStaticMesh>(Imported))
 							{
-								for (FStaticMaterial& StaticMaterialSlot : StaticMesh->GetStaticMaterials())
+								TArray<FStaticMaterial> UpdatedMaterials = StaticMesh->GetStaticMaterials();
+								for (FStaticMaterial& StaticMaterialSlot : UpdatedMaterials)
 								{
+									FinalStaticMaterialSlot = StaticMaterialSlot;
 									FString MaterialRef = StaticMaterialSlot.ImportedMaterialSlotName.ToString();
+									FString TrimmedMaterialRef = MaterialRef;
+									
+									// Strip _ncl1_ suffixes if present
+									int32 NclIndex = MaterialRef.Find(TEXT("_ncl1_"));
+									if (NclIndex != INDEX_NONE)
+									{
+										TrimmedMaterialRef = MaterialRef.Left(NclIndex);
+										FinalStaticMaterialSlot.ImportedMaterialSlotName = FName(*TrimmedMaterialRef);
+										UE_LOG(LogTemp, Warning, TEXT("Detected renamed material: %s → %s"), *MaterialRef, *TrimmedMaterialRef);
+									}
+									
 
-									if (!UEditorAssetLibrary::DoesAssetExist("/Game/" + CFGFolderName + "/Materials/" + MaterialRef)) continue;
 
-									if (ImportedMaterialRefs.Contains(MaterialRef))
-										continue;
+									//if (ImportedMaterialRefs.Contains(TrimmedMaterialRef))
+									//	continue;
 
-									ImportedMaterialRefs.Add(MaterialRef);
-									FString MaterialJsonPath = FPaths::Combine(AssetsPath, TEXT("Materials"), MaterialRef + TEXT(".json"));
+									ImportedMaterialRefs.Add(TrimmedMaterialRef);
+									FString MaterialJsonPath = FPaths::Combine(AssetsPath, TEXT("Materials"), TrimmedMaterialRef + TEXT(".json"));
 									if (!FPaths::FileExists(MaterialJsonPath)) continue;
 
 									FString JsonContent;
@@ -638,7 +707,8 @@ void FDestinyMapImportCFGModule::ImportCharmCFGButtonClicked()
 
 									// Import Textures
 									TMap<FString, TSharedPtr<FJsonValue>> TextureMap = MaterialJson->GetObjectField("Material")->GetObjectField("Pixel")->GetObjectField("Textures")->Values;
-									
+
+
 
 									if (bImportTextures == true && bImportMaterials == false)
 									{
@@ -648,10 +718,13 @@ void FDestinyMapImportCFGModule::ImportCharmCFGButtonClicked()
 
 									if (bImportMaterials == true)
 									{
-										FSkeletalMaterial EmptySkeletalMaterialSlot;
 										FDestinyMapImportCFGModule::FImportMaterials(file, StaticMaterialSlot, EmptySkeletalMaterialSlot, MaterialJson, true, TextureFactory);
+										StaticMaterialSlot = FinalStaticMaterialSlot;
 									}
 								}
+								StaticMesh->SetStaticMaterials(UpdatedMaterials);
+								StaticMesh->MarkPackageDirty();
+								StaticMesh->PostEditChange();
 							}
 						}
 					}
@@ -674,6 +747,14 @@ void FDestinyMapImportCFGModule::ImportCharmCFGButtonClicked()
 					return;
 				}
 
+				FbxFactory->ImportUI->bImportAsSkeletal = false;
+				FbxFactory->ImportUI->bImportMaterials = false;
+				FbxFactory->ImportUI->bImportTextures = false;
+				FbxFactory->ImportUI->SkeletalMeshImportData->ImportUniformScale = fMapScale;
+				FbxFactory->ImportUI->StaticMeshImportData->ImportUniformScale = fMapScale;
+				FbxFactory->ImportUI->StaticMeshImportData->bConvertScene = false;
+				FbxFactory->ImportUI->StaticMeshImportData->bConvertScene = false;
+				FbxFactory->ImportUI->StaticMeshImportData->bCombineMeshes = true;
 				UAutomatedAssetImportData* ImportData = NewObject<UAutomatedAssetImportData>();
 				ImportData->FactoryName = TEXT("FbxFactory");
 				ImportData->Factory = FbxFactory;
@@ -697,16 +778,29 @@ void FDestinyMapImportCFGModule::ImportCharmCFGButtonClicked()
 						FSkeletalMaterial EmptySkeletalMaterialSlot;
 						if (UStaticMesh* StaticMesh = Cast<UStaticMesh>(Imported))
 						{
-							for (FStaticMaterial& StaticMaterialSlot : StaticMesh->GetStaticMaterials())
+							TArray<FStaticMaterial> UpdatedMaterials = StaticMesh->GetStaticMaterials();
+							for (FStaticMaterial& StaticMaterialSlot : UpdatedMaterials)
 							{
-								FString MaterialRef = StaticMaterialSlot.ImportedMaterialSlotName.ToString();;
+								FinalStaticMaterialSlot = StaticMaterialSlot;
+								FString MaterialRef = StaticMaterialSlot.ImportedMaterialSlotName.ToString();
+								FString TrimmedMaterialRef = MaterialRef;
+								
+								// Strip _ncl1_ suffixes if present
+								int32 NclIndex = MaterialRef.Find(TEXT("_ncl1_"));
+								if (NclIndex != INDEX_NONE)
+								{
+									TrimmedMaterialRef = MaterialRef.Left(NclIndex);
+									FinalStaticMaterialSlot.ImportedMaterialSlotName = FName(*TrimmedMaterialRef);
+									UE_LOG(LogTemp, Warning, TEXT("Detected renamed material: %s → %s"), *MaterialRef, *TrimmedMaterialRef);
+								}
+								
 
-								if (ImportedMaterialRefs.Contains(MaterialRef))
-									continue;
 
-								ImportedMaterialRefs.Add(MaterialRef);
-								FString MaterialJsonPath = FPaths::Combine(AssetsPath, TEXT("Materials"), MaterialRef + TEXT(".json"));
-								if (!FPaths::FileExists(MaterialJsonPath)) continue;
+								//if (ImportedMaterialRefs.Contains(TrimmedMaterialRef))
+								//	continue;
+
+								ImportedMaterialRefs.Add(TrimmedMaterialRef);
+								FString MaterialJsonPath = FPaths::Combine(AssetsPath, TEXT("Materials"), TrimmedMaterialRef + TEXT(".json"));
 
 								FString JsonContent;
 								if (!FFileHelper::LoadFileToString(JsonContent, *MaterialJsonPath)) continue;
@@ -755,26 +849,40 @@ void FDestinyMapImportCFGModule::ImportCharmCFGButtonClicked()
 								if (bImportMaterials == true)
 								{
 									FDestinyMapImportCFGModule::FImportMaterials(file, StaticMaterialSlot, EmptySkeletalMaterialSlot, MaterialJson, true, TextureFactory);
+									StaticMaterialSlot = FinalStaticMaterialSlot;
 								}
 							}
+
+							StaticMesh->SetStaticMaterials(UpdatedMaterials);
 							StaticMesh->MarkPackageDirty();
 							StaticMesh->PostEditChange();
 						}
 
 						else if (USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(Imported))
 						{
-							for (FSkeletalMaterial& SkeletalMaterialSlot : SkeletalMesh->GetMaterials())
+							TArray<FSkeletalMaterial> UpdatedMaterials = SkeletalMesh->GetMaterials();
+							for (FSkeletalMaterial& SkeletalMaterialSlot : UpdatedMaterials)
 							{
+								FinalSkeletalMaterialSlot = SkeletalMaterialSlot;
 								FString MaterialRef = SkeletalMaterialSlot.ImportedMaterialSlotName.ToString();
-
-								if (UEditorAssetLibrary::DoesAssetExist("/Game/" + CFGFolderName + "/Materials/" + MaterialRef)) continue;
 								
-								if (ImportedMaterialRefs.Contains(MaterialRef))
-									continue;
+								FString TrimmedMaterialRef = MaterialRef;
+								
+								// Strip _ncl1_ suffixes if present
+								int32 NclIndex = MaterialRef.Find(TEXT("_ncl1_"));
+								if (NclIndex != INDEX_NONE)
+								{
+									TrimmedMaterialRef = MaterialRef.Left(NclIndex);
+									FinalSkeletalMaterialSlot.ImportedMaterialSlotName = FName(*TrimmedMaterialRef);
+									UE_LOG(LogTemp, Warning, TEXT("Detected renamed material: %s → %s"), *MaterialRef, *TrimmedMaterialRef);
+								}
+								
+								
+								//if (ImportedMaterialRefs.Contains(TrimmedMaterialRef))
+									//continue;
 
-								ImportedMaterialRefs.Add(MaterialRef);
-								FString MaterialJsonPath = FPaths::Combine(AssetsPath, TEXT("Materials"), MaterialRef + TEXT(".json"));
-								if (!FPaths::FileExists(MaterialJsonPath)) continue;
+								ImportedMaterialRefs.Add(TrimmedMaterialRef);
+								FString MaterialJsonPath = FPaths::Combine(AssetsPath, TEXT("Materials"), TrimmedMaterialRef + TEXT(".json"));
 
 								FString JsonContent;
 								if (!FFileHelper::LoadFileToString(JsonContent, *MaterialJsonPath)) continue;
@@ -825,6 +933,7 @@ void FDestinyMapImportCFGModule::ImportCharmCFGButtonClicked()
 									SkeletalMaterialSlot = FinalSkeletalMaterialSlot;
 								}
 							}
+							SkeletalMesh->SetMaterials(UpdatedMaterials);
 							SkeletalMesh->MarkPackageDirty();
 							SkeletalMesh->PostEditChange();
 						}
@@ -887,7 +996,6 @@ void FDestinyMapImportCFGModule::FImportToMap(TArray<FString> OutFiles)
 						UStaticMesh* TerrainMeshAsset = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), nullptr, *SplitAssetPath));
 						if (!TerrainMeshAsset) break;
 						FTransform Transform;
-						Transform.SetScale3D(FVector(1.f, -1.f, 1.f));
 						AStaticMeshActor* NewActor = GEditor->GetEditorWorldContext().World()->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Transform);
 						if (NewActor)
 						{
@@ -920,23 +1028,21 @@ void FDestinyMapImportCFGModule::FImportToMap(TArray<FString> OutFiles)
 							InstanceObj->GetArrayField("Translation")[2]->AsNumber()
 						);
 						Location *= fMapScale;
-
 						FQuat Rotation(
 							InstanceObj->GetArrayField("Rotation")[0]->AsNumber(),
 							InstanceObj->GetArrayField("Rotation")[1]->AsNumber(),
 							InstanceObj->GetArrayField("Rotation")[2]->AsNumber(),
 							InstanceObj->GetArrayField("Rotation")[3]->AsNumber()
 						);
-						Rotation.Normalize(); // ✅ ensure it's safe
-
-
 						FVector Scale(
 							InstanceObj->GetArrayField("Scale")[0]->AsNumber(),
 							InstanceObj->GetArrayField("Scale")[1]->AsNumber(),
 							InstanceObj->GetArrayField("Scale")[2]->AsNumber()
 						);
-						FVector NewScale = Scale * FVector(1.f, -1.f, 1.f);
-						FTransform Transform(Rotation, Location, NewScale);
+						Location.Y *= -1.f;
+						Rotation.Y *= -1.f;
+						Rotation.W *= -1.f;
+						FTransform Transform(Rotation, Location, Scale);
 
 						FString AssetPath = "/Game/" + CFGFolderName + "/Models/" + Type + "/" + MeshName + "." + MeshName;
 						if (UStaticMesh* MeshAsset = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), nullptr, *AssetPath)))
@@ -967,21 +1073,21 @@ void FDestinyMapImportCFGModule::FImportToMap(TArray<FString> OutFiles)
 							InstanceObj->GetArrayField("Translation")[2]->AsNumber()
 						);
 						Location *= fMapScale;
-
 						FQuat Rotation(
 							InstanceObj->GetArrayField("Rotation")[0]->AsNumber(),
 							InstanceObj->GetArrayField("Rotation")[1]->AsNumber(),
 							InstanceObj->GetArrayField("Rotation")[2]->AsNumber(),
 							InstanceObj->GetArrayField("Rotation")[3]->AsNumber()
 						);
-
 						FVector Scale(
 							InstanceObj->GetArrayField("Scale")[0]->AsNumber(),
 							InstanceObj->GetArrayField("Scale")[1]->AsNumber(),
 							InstanceObj->GetArrayField("Scale")[2]->AsNumber()
 						);
-						FVector NewScale = Scale * FVector(1.f, -1.f, 1.f);
-						FTransform Transform(Rotation, Location, NewScale);
+						Location.Y *= -1.f;
+						Rotation.Y *= -1.f;
+						Rotation.W *= -1.f;
+						FTransform Transform(Rotation, Location, Scale);
 
 						FString AssetPath = "/Game/" + CFGFolderName + "/Models/" + Type + "/" + MeshName + "." + MeshName;
 						if (UStaticMesh* MeshAsset = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), nullptr, *AssetPath)))
@@ -1181,7 +1287,7 @@ void FDestinyMapImportCFGModule::FImportTextures(TSharedPtr<FJsonObject> Materia
 						else if (Format == "BC4_UNORM")	ImportedTex->CompressionSettings = TC_Alpha;
 						else
 						{
-							UE_LOG(LogTemp, Warning, TEXT("Unknown Texture Format: %s"), *Format);
+							UE_LOG(LogTemp, Warning, TEXT("Unknown Texture Format for Texture %s: %s"), *Hash, *Format);
 							ImportedTex->CompressionSettings = TC_Default;
 						}
 						ImportedTex->PostEditChange();
@@ -1224,21 +1330,28 @@ void FDestinyMapImportCFGModule::FImportMaterials(FString ConfigPath, FStaticMat
 	if (isStaticMesh == true)
 	{
 		MaterialName = StaticMaterialSlot.ImportedMaterialSlotName.ToString();
+		
+		UE_LOG(LogTemp, Warning, TEXT("FImportMaterials called with slot name: %s"), *StaticMaterialSlot.ImportedMaterialSlotName.ToString());
 	}
 	else
 	{
 		MaterialName = SkeletalMaterialSlot.ImportedMaterialSlotName.ToString();
 	}
-	int32 NclPos = MaterialName.Find(TEXT("_ncl1_"));
-	if (NclPos != INDEX_NONE)
-	{
-		MaterialName = MaterialName.Left(NclPos);
-	}
-	FString MatPath = "/Game/" + CFGFolderName + "/Materials/" + MaterialName;
 
-	if (UEditorAssetLibrary::DoesAssetExist(MatPath))
+	FString TrimmedMaterialRef = MaterialName;
+	int32 NclIndex = MaterialName.Find(TEXT("_ncl1_"));
+	if (NclIndex != INDEX_NONE)
 	{
-		UObject* LoadedObj = UEditorAssetLibrary::LoadAsset(MatPath);
+		TrimmedMaterialRef = MaterialName.Left(NclIndex);
+		FinalStaticMaterialSlot.ImportedMaterialSlotName = FName(*TrimmedMaterialRef);
+		UE_LOG(LogTemp, Warning, TEXT("Detected renamed material: %s → %s"), *MaterialName, *TrimmedMaterialRef);
+	}
+
+	FString MatPath = "/Game/" + CFGFolderName + "/Materials/" + TrimmedMaterialRef + "." + TrimmedMaterialRef;
+	UMaterial* NewMaterial;
+	if (UObject* LoadedObj = UEditorAssetLibrary::LoadAsset(MatPath))
+	{
+
 		if (!LoadedObj)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("No Object Loaded: %s"), *LoadedObj->GetName());
@@ -1247,98 +1360,88 @@ void FDestinyMapImportCFGModule::FImportMaterials(FString ConfigPath, FStaticMat
 		{
 			UE_LOG(LogTemp, Warning, TEXT("Object Successfully Loaded: %s"), *LoadedObj->GetName());
 		}
-		UMaterialInterface* LoadedMaterial = Cast<UMaterialInterface>(LoadedObj);
-		if (!LoadedMaterial)
+		NewMaterial = Cast<UMaterial>(LoadedObj);
+		if (!NewMaterial)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("No Material Loaded: %s"), *LoadedMaterial->GetName());
+			UE_LOG(LogTemp, Warning, TEXT("No Material Loaded: %s"), *NewMaterial->GetName());
 		}
 		else
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Material Successfully Loaded: %s"), *LoadedMaterial->GetName());
+			UE_LOG(LogTemp, Warning, TEXT("Material Successfully Loaded: %s"), *NewMaterial->GetName());
 		}
-		LoadedMaterial->AddToRoot();
-		LoadedMaterial->PostEditChange();
-		LoadedMaterial->MarkPackageDirty();
-		if (LoadedMaterial)
+		if (NewMaterial)
 		{
-			if (isStaticMesh)
-			{
-				FString ExistingMaterial = StaticMaterialSlot.MaterialInterface.GetPath();
-				UE_LOG(LogTemp, Warning, TEXT("Existing Material applied: %s"), *ExistingMaterial);
-				StaticMaterialSlot.MaterialInterface = LoadedMaterial;
-			}
-			else
-			{
-				FString ExistingMaterial = SkeletalMaterialSlot.MaterialInterface.GetPath();
-				FinalSkeletalMaterialSlot.MaterialInterface = LoadedMaterial;
-				UE_LOG(LogTemp, Warning, TEXT("Existing Material applied: %s"), *ExistingMaterial);
-			}
 		}
 	}
 	else
 	{
+
+		MatPath = "/Game/" + CFGFolderName + "/Materials/" + TrimmedMaterialRef;
 		UPackage* Package = CreatePackage(*MatPath);
-		UMaterial* NewMaterial = NewObject<UMaterial>(Package, *MaterialName, RF_Public | RF_Standalone);
+		NewMaterial = NewObject<UMaterial>(Package, *MaterialName, RF_Public | RF_Standalone);
 		NewMaterial->AddToRoot();
 
 		UMaterialExpressionTextureSample* FirstSRGBSample = nullptr;
 		if (bImportTextures == true)
 		{
-
-			FDestinyMapImportCFGModule::FImportTextures(MaterialJson, ConfigPath, TextureFactory);
-
-			TMap<FString, TSharedPtr<FJsonValue>> TextureMap = MaterialJson->GetObjectField("Material")->GetObjectField("Pixel")->GetObjectField("Textures")->Values;
-
-
-			int32 Index = 0;
-			for (const auto& TextureEntry : TextureMap)
+			if (bMaterialGen)
 			{
-				TSharedPtr<FJsonObject> TextureObj = TextureEntry.Value->AsObject();
-				FString Hash = TextureObj->GetStringField("Hash");
-				FString Colorspace = TextureObj->GetStringField("Colorspace");
-				FString TexturePath = "/Game/" + CFGFolderName + "/Textures/" + Hash + "." + Hash;
-				UTexture2D* TextureAsset = Cast<UTexture2D>(StaticLoadObject(UTexture2D::StaticClass(), nullptr, *TexturePath));
-				if (!TextureAsset) continue;
+				FDestinyMapImportCFGModule::FImportTextures(MaterialJson, ConfigPath, TextureFactory);
 
-				UMaterialExpressionTextureSample* TextureSample = NewObject<UMaterialExpressionTextureSample>(NewMaterial);
-				TextureSample->Texture = TextureAsset;
-				TextureSample->Material = NewMaterial;
-				TextureSample->SamplerType = (Colorspace == TEXT("sRGB")) ? SAMPLERTYPE_Color : SAMPLERTYPE_LinearColor;
-				TextureSample->Desc = Hash;
+				TMap<FString, TSharedPtr<FJsonValue>> TextureMap = MaterialJson->GetObjectField("Material")->GetObjectField("Pixel")->GetObjectField("Textures")->Values;
 
-				// Place expressions starting at (-320, 0), stepping vertically by 300
-				TextureSample->MaterialExpressionEditorX = -320;
-				TextureSample->MaterialExpressionEditorY = Index * 300;
 
-				NewMaterial->GetEditorOnlyData()->ExpressionCollection.Expressions.Add(TextureSample);
-
-				if (!FirstSRGBSample && Colorspace == TEXT("sRGB"))
+				int32 Index = 0;
+				for (const auto& TextureEntry : TextureMap)
 				{
-					FirstSRGBSample = TextureSample;
+					TSharedPtr<FJsonObject> TextureObj = TextureEntry.Value->AsObject();
+					FString Hash = TextureObj->GetStringField("Hash");
+					FString Colorspace = TextureObj->GetStringField("Colorspace");
+					FString TexturePath = "/Game/" + CFGFolderName + "/Textures/" + Hash + "." + Hash;
+					UTexture2D* TextureAsset = Cast<UTexture2D>(StaticLoadObject(UTexture2D::StaticClass(), nullptr, *TexturePath));
+					if (!TextureAsset) continue;
+
+					UMaterialExpressionTextureSample* TextureSample = NewObject<UMaterialExpressionTextureSample>(NewMaterial);
+					TextureSample->Texture = TextureAsset;
+					TextureSample->Material = NewMaterial;
+					TextureSample->SamplerType = (Colorspace == TEXT("sRGB")) ? SAMPLERTYPE_Color : SAMPLERTYPE_LinearColor;
+					TextureSample->Desc = Hash;
+
+					// Place expressions starting at (-320, 0), stepping vertically by 300
+					TextureSample->MaterialExpressionEditorX = -320;
+					TextureSample->MaterialExpressionEditorY = Index * 300;
+
+					NewMaterial->GetEditorOnlyData()->ExpressionCollection.Expressions.Add(TextureSample);
+
+					if (bDiffuseApply && !FirstSRGBSample && Colorspace == TEXT("sRGB"))
+					{
+						FirstSRGBSample = TextureSample;
+					}
+
+					++Index;
 				}
 
-				++Index;
-			}
 
 
-
-			if (FirstSRGBSample)
-			{
-				NewMaterial->GetEditorOnlyData()->BaseColor.Expression = FirstSRGBSample;
+				if (bDiffuseApply && FirstSRGBSample)
+				{
+					NewMaterial->GetEditorOnlyData()->BaseColor.Expression = FirstSRGBSample;
+				}
 			}
 		}
 
 		NewMaterial->PostEditChange();
 		NewMaterial->MarkPackageDirty();
 		FAssetRegistryModule::AssetCreated(NewMaterial);
-		if (isStaticMesh == true)
-		{
-			StaticMaterialSlot.MaterialInterface = NewMaterial;
-		}
-		else
-		{
-			FinalSkeletalMaterialSlot.MaterialInterface = NewMaterial;
-		}
+
+	}
+	if (isStaticMesh == true)
+	{
+		FinalStaticMaterialSlot.MaterialInterface = NewMaterial;
+	}
+	else
+	{
+		FinalSkeletalMaterialSlot.MaterialInterface = NewMaterial;
 	}
 }
 	
